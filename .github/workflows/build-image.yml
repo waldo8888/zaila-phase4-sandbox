@@ -1,0 +1,49 @@
+# Builds the site image on GitHub (not on the server) and pushes it to Amazon ECR in ca-central-1. Zaila OS
+# deploys it when this run finishes (GitHub tells it), so no Coolify token lives in this repository. No long-lived
+# AWS keys: GitHub signs in to AWS through OIDC as the role below, which can only push to zaila/* repositories.
+name: Build image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: build-image
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: ca-central-1
+  ECR_REPOSITORY: zaila/zaila-phase4-sandbox
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::696277998543:role/zaila-github-ecr-push
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
